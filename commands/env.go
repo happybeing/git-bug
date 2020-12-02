@@ -12,6 +12,7 @@ import (
 	"github.com/MichaelMure/git-bug/identity"
 	"github.com/MichaelMure/git-bug/repository"
 	"github.com/MichaelMure/git-bug/util/interrupt"
+	osfs "github.com/go-git/go-billy/v5/osfs"
 )
 
 // Env is the environment of a command
@@ -54,7 +55,8 @@ func loadRepo(env *Env) func(*cobra.Command, []string) error {
 			return fmt.Errorf("unable to get the current working directory: %q", err)
 		}
 
-		env.repo, err = repository.NewGoGitRepo(cwd, []repository.ClockLoader{bug.ClockLoader})
+		fs := osfs.New(cwd)
+		env.repo, err = repository.NewGoGitRepo(cwd, []repository.ClockLoader{bug.ClockLoader}, fs)
 		if err == repository.ErrNotARepo {
 			return fmt.Errorf("%s must be run from within a git repo", rootCommandName)
 		}

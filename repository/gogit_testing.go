@@ -3,6 +3,9 @@ package repository
 import (
 	"io/ioutil"
 	"log"
+
+	"github.com/go-git/go-billy/v5"
+	"github.com/go-git/go-billy/v5/memfs"
 )
 
 // This is intended for testing only
@@ -13,7 +16,7 @@ func CreateGoGitTestRepo(bare bool) TestedRepo {
 		log.Fatal(err)
 	}
 
-	var creator func(string) (*GoGitRepo, error)
+	var creator func(string, billy.Filesystem) (*GoGitRepo, error)
 
 	if bare {
 		creator = InitBareGoGitRepo
@@ -21,7 +24,8 @@ func CreateGoGitTestRepo(bare bool) TestedRepo {
 		creator = InitGoGitRepo
 	}
 
-	repo, err := creator(dir)
+	fs := memfs.New()
+	repo, err := creator(dir, fs)
 	if err != nil {
 		log.Fatal(err)
 	}

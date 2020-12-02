@@ -13,12 +13,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-git/go-billy"
+	"github.com/go-git/go-billy/v5"
+	osfs "github.com/go-git/go-billy/v5/osfs"
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	storagefs "github.com/go-git/go-git/v5/storage/filesystem"
 
 	"github.com/MichaelMure/git-bug/util/lamport"
 )
@@ -41,14 +43,45 @@ type RepoStorage interface {
 	Storage() billy.Filesystem
 }
 
-func NewGoGitRepo(path string, clockLoaders []ClockLoader) (*GoGitRepo, error) {
-	path, err := detectGitPath(path)
+// NewGoGitRepo opens a git repository with a new GoGitRepo object
+// fs is the filesystem containing the git repo to be opened, or if nil, a billy.Filesystem
+// is created which accesses the device filesystem (using go-billy osfs).
+// path is relative the the root of the filesystem used, and may be in the same or a subdirectory
+// of the .git directory for the git repository being opened.
+func NewGoGitRepo(path string, clockLoaders []ClockLoader, fs billy.Filesystem) (*GoGitRepo, error) {
+	println("NewGoGitRepo()... at:", path)
+	path, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
 	}
 
-	r, err := gogit.PlainOpen(path)
+	if fs == nil {
+		fs = osfs.New(path)
+	}
+
+	repoPath, gitDirPath, err := detectRepoPaths(path, fs)
 	if err != nil {
+		return nil, err
+	}
+
+	dotGitFs, err := fs.Chroot(gitDirPath)
+	if err != nil {
+		println("failed at dotGitGs Chroot()")
+		return nil, err
+	}
+
+	println("repoPath:", repoPath)
+	println("gitDirPath:", gitDirPath)
+	// fs, err = fs.Chroot(stdpath.Join(gitPath, "git-bug"))
+	// if err != nil {
+	// 	println("failed fs.Chroot()")
+	// 	return nil, err
+	// }
+
+	wt := osfs.New(repoPath)
+	r, err := gogit.Open(storagefs.NewStorage(dotGitFs, nil), wt)
+	if err != nil {
+		println("failed gogit.Open()")
 		return nil, err
 	}
 
@@ -59,7 +92,7 @@ func NewGoGitRepo(path string, clockLoaders []ClockLoader) (*GoGitRepo, error) {
 
 	repo := &GoGitRepo{
 		r:       r,
-		path:    path,
+		path:    gitDirPath,
 		clocks:  make(map[string]lamport.Clock),
 		keyring: k,
 	}
@@ -83,48 +116,60 @@ func NewGoGitRepo(path string, clockLoaders []ClockLoader) (*GoGitRepo, error) {
 	return repo, nil
 }
 
-func detectGitPath(path string) (string, error) {
+// Returns repo and git paths which has a plain or bare git repo
+// starting from path and checking each parent
+func detectRepoPaths(path string, fs billy.Filesystem) (string, string, error) {
+	println("detectRepoPath()... given:", path)
 	// normalize the path
 	path, err := filepath.Abs(path)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	for {
-		fi, err := os.Stat(stdpath.Join(path, ".git"))
+		var gitDirPath string
+		if filepath.Base(path) == ".git" {
+			gitDirPath = path
+		} else {
+			gitDirPath = stdpath.Join(path, ".git")
+		}
+
+		println("test gitDirPath exists:", gitDirPath)
+		fi, err := fs.Stat(gitDirPath)
 		if err == nil {
 			if !fi.IsDir() {
-				return "", fmt.Errorf(".git exist but is not a directory")
+				return "", "", fmt.Errorf(".git exist but is not a directory")
 			}
-			return stdpath.Join(path, ".git"), nil
+			return stdpath.Dir(gitDirPath), gitDirPath, nil
 		}
 		if !os.IsNotExist(err) {
 			// unknown error
-			return "", err
+			return "", "", err
 		}
 
 		// detect bare repo
-		ok, err := isGitDir(path)
+		ok, err := isGitDir(path, fs)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		if ok {
-			return path, nil
+			println("found isGitDir() true for:", path)
+			return path, path, nil
 		}
 
 		if parent := filepath.Dir(path); parent == path {
-			return "", fmt.Errorf(".git not found")
+			return "", "", fmt.Errorf(".git not found")
 		} else {
 			path = parent
 		}
 	}
 }
 
-func isGitDir(path string) (bool, error) {
+func isGitDir(path string, fs billy.Filesystem) (bool, error) {
 	markers := []string{"HEAD", "objects", "refs"}
 
 	for _, marker := range markers {
-		_, err := os.Stat(stdpath.Join(path, marker))
+		_, err := fs.Stat(stdpath.Join(path, marker))
 		if err == nil {
 			continue
 		}
@@ -140,14 +185,28 @@ func isGitDir(path string) (bool, error) {
 }
 
 // InitGoGitRepo create a new empty git repo at the given path
-func InitGoGitRepo(path string) (*GoGitRepo, error) {
-	r, err := gogit.PlainInit(path, false)
+// fs is the filesystem and if nil a go-billy/osfs will be used (local filesystem)
+func InitGoGitRepo(path string, fs billy.Filesystem) (*GoGitRepo, error) {
+	println("InitGoGitRepo()... at:", path)
+
+	if fs == nil {
+		fs = osfs.New(path)
+	}
+	dotGitFs, err := fs.Chroot(".git")
 	if err != nil {
+		println("failed fs.Chroot()")
+		return nil, err
+	}
+
+	r, err := gogit.Init(storagefs.NewStorage(dotGitFs, nil), fs)
+	if err != nil {
+		println("failed gogit.Init()")
 		return nil, err
 	}
 
 	k, err := defaultKeyring()
 	if err != nil {
+		println("failed defautKeyring")
 		return nil, err
 	}
 
@@ -160,14 +219,22 @@ func InitGoGitRepo(path string) (*GoGitRepo, error) {
 }
 
 // InitBareGoGitRepo create a new --bare empty git repo at the given path
-func InitBareGoGitRepo(path string) (*GoGitRepo, error) {
-	r, err := gogit.PlainInit(path, true)
+// fs is the filesystem and if nil a go-billy/osfs will be used (local filesystem)
+func InitBareGoGitRepo(path string, fs billy.Filesystem) (*GoGitRepo, error) {
+	println("InitBareGoGitRepo()... at:", path)
+
+	if fs == nil {
+		fs = osfs.New(path)
+	}
+	r, err := gogit.Init(storagefs.NewStorage(fs, nil), nil)
 	if err != nil {
+		println("failed gogit.Init()")
 		return nil, err
 	}
 
 	k, err := defaultKeyring()
 	if err != nil {
+		println("failed defaultKeyring()")
 		return nil, err
 	}
 

@@ -15,6 +15,7 @@ require (
 	github.com/fatih/color v1.10.0
 	github.com/go-git/go-billy v4.2.0+incompatible
 	github.com/go-git/go-billy/v5 v5.0.0
+	github.com/go-git/go-git v4.7.0+incompatible
 	github.com/go-git/go-git/v5 v5.2.0
 	github.com/golang/protobuf v1.4.3 // indirect
 	github.com/gorilla/mux v1.8.0
@@ -41,4 +42,5 @@ require (
 	golang.org/x/text v0.3.4
 	golang.org/x/time v0.0.0-20200630173020-3af7569d3a1e // indirect
 	google.golang.org/appengine v1.6.7 // indirect
+	gopkg.in/src-d/go-git.v4 v4.13.1 // indirect
 )
