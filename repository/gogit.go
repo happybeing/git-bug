@@ -21,6 +21,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	storagefs "github.com/go-git/go-git/v5/storage/filesystem"
 	"github.com/go-git/go-git/v5/storage/memory"
 
 	"github.com/MichaelMure/git-bug/util/lamport"
@@ -85,6 +86,143 @@ func OpenGoGitRepo(path string, clockLoaders []ClockLoader) (*GoGitRepo, error) 
 	return repo, nil
 }
 
+// OpenFsGoGitRepo opens a git repository and returns a GoGitRepo object
+// if fs is not nil, it must contain the git repo to be opened
+// if fs is nil, the repo to be opened must be present on the device
+// path is relative the the root of the filesystem used, and may be the repo
+// directory or a subdirectory of the git repo being opened.
+func OpenFsGoGitRepo(path string, clockLoaders []ClockLoader, fs billy.Filesystem) (*GoGitRepo, error) {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+
+	if fs == nil {
+		fs = osfs.New(path)
+	}
+
+	repoPath, gitDirPath, err := detectRepoPathsFs(path, fs)
+	if err != nil {
+		return nil, err
+	}
+
+	dotGitFs, err := fs.Chroot(gitDirPath)
+	if err != nil {
+		return nil, err
+	}
+
+	wt, err := fs.Chroot(repoPath)
+	if err != nil {
+		return nil, err
+	}
+
+	r, err := gogit.Open(storagefs.NewStorage(dotGitFs, nil), wt)
+	if err != nil {
+		return nil, err
+	}
+
+	gitBugFs, err := fs.Chroot(filepath.Join(gitDirPath, "git-bug"))
+	if err != nil {
+		return nil, err
+	}
+
+	k, err := defaultKeyring()
+	if err != nil {
+		return nil, err
+	}
+
+	repo := &GoGitRepo{
+		r:            r,
+		path:         gitDirPath,
+		clocks:       make(map[string]lamport.Clock),
+		keyring:      k,
+		localStorage: gitBugFs,
+	}
+
+	for _, loader := range clockLoaders {
+		allExist := true
+		for _, name := range loader.Clocks {
+			if _, err := repo.getClock(name); err != nil {
+				allExist = false
+			}
+		}
+
+		if !allExist {
+			err = loader.Witnesser(repo)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return repo, nil
+}
+
+// Returns repo and git paths which has a plain or bare git repo
+// starting from path and checking each parent
+func detectRepoPathsFs(path string, fs billy.Filesystem) (string, string, error) {
+	// normalize the path
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return "", "", err
+	}
+
+	for {
+		var gitDirPath string
+		if filepath.Base(path) == ".git" {
+			gitDirPath = path
+		} else {
+			gitDirPath = filepath.Join(path, ".git")
+		}
+
+		fi, err := fs.Stat(gitDirPath)
+		if err == nil {
+			if !fi.IsDir() {
+				return "", "", fmt.Errorf(".git exist but is not a directory")
+			}
+			return filepath.Dir(gitDirPath), gitDirPath, nil
+		}
+		if !os.IsNotExist(err) {
+			// unknown error
+			return "", "", err
+		}
+
+		// detect bare repo
+		ok, err := isGitDirFs(path, fs)
+		if err != nil {
+			return "", "", err
+		}
+		if ok {
+			return path, path, nil
+		}
+
+		if parent := filepath.Dir(path); parent == path {
+			return "", "", fmt.Errorf(".git not found")
+		} else {
+			path = parent
+		}
+	}
+}
+
+func isGitDirFs(path string, fs billy.Filesystem) (bool, error) {
+	markers := []string{"HEAD", "objects", "refs"}
+
+	for _, marker := range markers {
+		_, err := fs.Stat(filepath.Join(path, marker))
+		if err == nil {
+			continue
+		}
+		if !os.IsNotExist(err) {
+			// unknown error
+			return false, err
+		} else {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
 // InitGoGitRepo create a new empty git repo at the given path
 func InitGoGitRepo(path string) (*GoGitRepo, error) {
 	r, err := gogit.PlainInit(path, false)
@@ -129,6 +267,7 @@ func InitBareGoGitRepo(path string) (*GoGitRepo, error) {
 	}, nil
 }
 
+// InitMemoryGoGitRepo create a new --bare empty git in memory
 func InitMemoryGoGitRepo() (*GoGitRepo, error) {
 	r, err := gogit.Init(memory.NewStorage(), nil)
 	if err != nil {
@@ -143,6 +282,94 @@ func InitMemoryGoGitRepo() (*GoGitRepo, error) {
 		clocks:       make(map[string]lamport.Clock),
 		keyring:      k,
 		localStorage: memfs.New(),
+	}
+
+	return repo, nil
+}
+
+// InitFsGoGitRepo creates a new empty git worktree and worktree/.git/ in the given filesystem
+// If baseFs is not nil, its root must be at path, and the worktree will be created the root of the filesystem
+// If baseFs is nil, an osfs will be used (equivalent to calling InitBareGoGitRepo())
+func InitFsGoGitRepo(path string, baseFs billy.Filesystem) (*GoGitRepo, error) {
+	println("InitFsGoGitRepo()... at:", path)
+
+	var fs billy.Filesystem
+	var err error
+	if baseFs != nil {
+		fs, err = baseFs.Chroot(path)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		fs = osfs.New(path)
+	}
+
+	dotGitFs, err := fs.Chroot(".git")
+	if err != nil {
+		return nil, err
+	}
+
+	r, err := gogit.Init(storagefs.NewStorage(dotGitFs, nil), fs)
+	if err != nil {
+		println(err.Error())
+		return nil, err
+	}
+
+	gitBugFs, err := fs.Chroot(filepath.Join(".git", "git-bug"))
+	if err != nil {
+		println(err.Error())
+		return nil, err
+	}
+
+	k, err := defaultKeyring()
+	if err != nil {
+		println(err.Error())
+		return nil, err
+	}
+
+	repo := &GoGitRepo{
+		r:            r,
+		isMemory:     true,
+		clocks:       make(map[string]lamport.Clock),
+		keyring:      k,
+		localStorage: gitBugFs,
+	}
+
+	return repo, nil
+}
+
+// InitFsBareGoGitRepo creates a new --bare empty git in the given filesystem
+// If baseFs is not nil, the worktree will be created at path, in baseFs
+// If baseFs is nil, an osfs will be used (equivalent to calling InitBareGoGitRepo())
+func InitFsBareGoGitRepo(path string, baseFs billy.Filesystem) (*GoGitRepo, error) {
+	println("InitFsBareGoGitRepo()... at:", path)
+
+	var fs billy.Filesystem
+	var err error
+	if baseFs != nil {
+		fs, err = baseFs.Chroot(path)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		fs = osfs.New(path)
+	}
+	r, err := gogit.Init(storagefs.NewStorage(fs, nil), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	k, err := defaultKeyring()
+	if err != nil {
+		return nil, err
+	}
+
+	repo := &GoGitRepo{
+		r:            r,
+		isMemory:     true,
+		clocks:       make(map[string]lamport.Clock),
+		keyring:      k,
+		localStorage: fs,
 	}
 
 	return repo, nil
