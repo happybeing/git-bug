@@ -40,4 +40,5 @@ require (
 	golang.org/x/text v0.3.4
 	golang.org/x/time v0.0.0-20200630173020-3af7569d3a1e // indirect
 	google.golang.org/appengine v1.6.7 // indirect
+	gopkg.in/src-d/go-git.v4 v4.13.1 // indirect
 )

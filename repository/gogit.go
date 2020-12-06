@@ -19,6 +19,7 @@ import (
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/cache"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	storagefs "github.com/go-git/go-git/v5/storage/filesystem"
@@ -116,7 +117,7 @@ func OpenFsGoGitRepo(path string, clockLoaders []ClockLoader, fs billy.Filesyste
 		return nil, err
 	}
 
-	r, err := gogit.Open(storagefs.NewStorage(dotGitFs, nil), wt)
+	r, err := gogit.Open(storagefs.NewStorage(dotGitFs, cache.NewObjectLRUDefault()), wt)
 	if err != nil {
 		return nil, err
 	}
@@ -291,7 +292,7 @@ func InitMemoryGoGitRepo() (*GoGitRepo, error) {
 // If baseFs is not nil, its root must be at path, and the worktree will be created the root of the filesystem
 // If baseFs is nil, an osfs will be used (equivalent to calling InitBareGoGitRepo())
 func InitFsGoGitRepo(path string, baseFs billy.Filesystem) (*GoGitRepo, error) {
-	println("InitFsGoGitRepo()... at:", path)
+	// println("InitFsGoGitRepo()... at:", path)
 
 	var fs billy.Filesystem
 	var err error
@@ -309,7 +310,7 @@ func InitFsGoGitRepo(path string, baseFs billy.Filesystem) (*GoGitRepo, error) {
 		return nil, err
 	}
 
-	r, err := gogit.Init(storagefs.NewStorage(dotGitFs, nil), fs)
+	r, err := gogit.Init(storagefs.NewStorage(dotGitFs, cache.NewObjectLRUDefault()), fs)
 	if err != nil {
 		println(err.Error())
 		return nil, err
@@ -343,7 +344,7 @@ func InitFsGoGitRepo(path string, baseFs billy.Filesystem) (*GoGitRepo, error) {
 // If baseFs is not nil, the worktree will be created at path, in baseFs
 // If baseFs is nil, an osfs will be used (equivalent to calling InitBareGoGitRepo())
 func InitFsBareGoGitRepo(path string, baseFs billy.Filesystem) (*GoGitRepo, error) {
-	println("InitFsBareGoGitRepo()... at:", path)
+	// println("InitFsBareGoGitRepo()... at:", path)
 
 	var fs billy.Filesystem
 	var err error
@@ -355,7 +356,7 @@ func InitFsBareGoGitRepo(path string, baseFs billy.Filesystem) (*GoGitRepo, erro
 	} else {
 		fs = osfs.New(path)
 	}
-	r, err := gogit.Init(storagefs.NewStorage(fs, nil), nil)
+	r, err := gogit.Init(storagefs.NewStorage(fs, cache.NewObjectLRUDefault()), nil)
 	if err != nil {
 		return nil, err
 	}
