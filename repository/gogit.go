@@ -329,6 +329,7 @@ func InitFsGoGitRepo(path string, baseFs billy.Filesystem) (*GoGitRepo, error) {
 
 	repo := &GoGitRepo{
 		r:            r,
+		path:         path,
 		isMemory:     true,
 		clocks:       make(map[string]lamport.Clock),
 		keyring:      k,
@@ -366,6 +367,7 @@ func InitFsBareGoGitRepo(path string, baseFs billy.Filesystem) (*GoGitRepo, erro
 
 	repo := &GoGitRepo{
 		r:            r,
+		path:         path,
 		isMemory:     true,
 		clocks:       make(map[string]lamport.Clock),
 		keyring:      k,
