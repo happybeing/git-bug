@@ -102,7 +102,7 @@ func TestNewFsGoGitRepo(t *testing.T) {
 
 		// Plain repo
 		{plainRoot, plainGitDir, false},
-		{plainGitDir, plainGitDir, false}, //<<<FAILING
+		{plainGitDir, plainGitDir, false},
 		{path.Join(plainGitDir, "objects"), plainGitDir, false},
 
 		// Bare repo
