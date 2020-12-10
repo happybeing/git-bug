@@ -93,11 +93,6 @@ func OpenGoGitRepo(path string, clockLoaders []ClockLoader) (*GoGitRepo, error) 
 // path is relative the the root of the filesystem used, and may be the repo
 // directory or a subdirectory of the git repo being opened.
 func OpenFsGoGitRepo(path string, clockLoaders []ClockLoader, fs billy.Filesystem) (*GoGitRepo, error) {
-	path, err := filepath.Abs(path)
-	if err != nil {
-		return nil, err
-	}
-
 	if fs == nil {
 		fs = osfs.New(path)
 	}
@@ -106,7 +101,6 @@ func OpenFsGoGitRepo(path string, clockLoaders []ClockLoader, fs billy.Filesyste
 	if err != nil {
 		return nil, err
 	}
-
 	dotGitFs, err := fs.Chroot(gitDirPath)
 	if err != nil {
 		return nil, err
@@ -126,8 +120,9 @@ func OpenFsGoGitRepo(path string, clockLoaders []ClockLoader, fs billy.Filesyste
 	if err != nil {
 		return nil, err
 	}
-
-	k, err := defaultKeyring()
+	// FIXME keyring is disabled because it causes an error when called from wasm (I think by writing to the os filesystem)
+	var k Keyring = nil
+	// k, err := defaultKeyring()
 	if err != nil {
 		return nil, err
 	}
@@ -162,12 +157,6 @@ func OpenFsGoGitRepo(path string, clockLoaders []ClockLoader, fs billy.Filesyste
 // Returns repo and git paths which has a plain or bare git repo
 // starting from path and checking each parent
 func detectRepoPathsFs(path string, fs billy.Filesystem) (string, string, error) {
-	// normalize the path
-	path, err := filepath.Abs(path)
-	if err != nil {
-		return "", "", err
-	}
-
 	for {
 		var gitDirPath string
 		if filepath.Base(path) == ".git" {
@@ -309,7 +298,6 @@ func InitFsGoGitRepo(path string, baseFs billy.Filesystem) (*GoGitRepo, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	r, err := gogit.Init(storagefs.NewStorage(dotGitFs, cache.NewObjectLRUDefault()), fs)
 	if err != nil {
 		println(err.Error())
@@ -322,7 +310,9 @@ func InitFsGoGitRepo(path string, baseFs billy.Filesystem) (*GoGitRepo, error) {
 		return nil, err
 	}
 
-	k, err := defaultKeyring()
+	// FIXME keyring is disabled because it causes an error when called from wasm (I think by writing to the os filesystem)
+	var k Keyring = nil
+	// k, err := defaultKeyring()
 	if err != nil {
 		println(err.Error())
 		return nil, err
