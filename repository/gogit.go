@@ -424,6 +424,11 @@ func isGitDir(path string) (bool, error) {
 	return true, nil
 }
 
+// GetGitRepo provides external access to the gogit.Repository implementation
+func (gr *GoGitRepo) GetGitRepo() *gogit.Repository {
+	return gr.r
+}
+
 // LocalConfig give access to the repository scoped configuration
 func (repo *GoGitRepo) LocalConfig() Config {
 	return newGoGitLocalConfig(repo.r)
